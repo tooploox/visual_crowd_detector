@@ -1,8 +1,13 @@
-import numpy as np
-import tensorflow as tf
-import cv2
+from collections import defaultdict
 import time
+import operator
 
+import cv2
+import numpy as np
+import fire
+import tensorflow as tf
+
+from danger_zone_detector import (calculate_centers, calculate_cell_centers, find_cell)
 
 class DetectorAPI:
     def __init__(self, path_to_ckpt):
@@ -59,29 +64,52 @@ class DetectorAPI:
         self.default_graph.close()
 
 
-if __name__ == "__main__":
-    #model_path = 'faster_rcnn_inception_v2_coco_2018_01_28/frozen_inference_graph.pb'
-    model_path = 'mask_rcnn_inception_v2_coco_2018_01_28/frozen_inference_graph.pb'
+def main(model_path='mask_rcnn_inception_v2_coco_2018_01_28/frozen_inference_graph.pb',
+         video_path='scene_1.mp4'):
+    fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+    writer = None
+
     odapi = DetectorAPI(path_to_ckpt=model_path)
     threshold = 0.7
-    cap = cv2.VideoCapture('scene_1.mp4')
+    cap = cv2.VideoCapture(video_path)
 
+    total_occupancy = defaultdict(int)
+    cell_centers = None
 
+    cnt = 0
     while True:
         r, img = cap.read()
         if img is None:
             break
+        cnt += 1
         img = cv2.resize(img, (1280, 720))
 
         masks, boxes, scores, classes, num = odapi.processFrame(img)
+
+        centers = calculate_centers(boxes)
+
+        if cell_centers is None:
+            cell_centers = calculate_cell_centers(img, step_size=200)
+            print(cell_centers)
+
+        occupancy = defaultdict(int)
+        point_cell = dict()
+        for i, (point, class_, score) in enumerate(zip(centers, classes, scores)):
+            if not (class_ == 1 and score > threshold):
+                continue
+            cell_ind = find_cell(cell_centers, point)
+            occupancy[cell_ind] += 1
+            total_occupancy[cell_ind] += 1
+            point_cell[i] = cell_ind
+
         for i in range(len(boxes)):
             # Class 1 represents human
             if classes[i] == 1 and scores[i] > threshold:
+
                 box = boxes[i]
-                cv2.rectangle(img, (box[1], box[0]), (box[3], box[2]), (255, 0, 0), 2)
                 mask = masks[i]
                 mask = (mask > threshold)
-                
+
                 startX = box[1]
                 startY = box[0]
                 endX = box[3]
@@ -90,10 +118,36 @@ if __name__ == "__main__":
                 roi = roi[mask]
 
                 color = np.array([255.0, 0.0, 0.0])
+                person_cell = point_cell[i]
+                if occupancy[person_cell] > 2:
+                    color = np.array([0.0, 0.0, 255.0])
+
                 blended = ((0.4 * color) + (0.6 * roi)).astype("uint8")
                 img[startY:endY, startX:endX][mask] = blended
 
+                if cnt > 10:
+                    alpha = 0.05
+                    overlay = img.copy()
+                    sorted_x = sorted(total_occupancy.items(), key=operator.itemgetter(1))
+                    top_dangerous = sorted_x[-3:]
+                    for dangerous in top_dangerous:
+                        center = cell_centers[dangerous[0]]
+                        cv2.circle(overlay, (center[0], center[1]), 30, (0, 0, 255), -1)
+                        img = cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0)
+
         cv2.imshow("preview", img)
-        key = cv2.waitKey(1)
+        key = cv2.waitKey(200)
         if key & 0xFF == ord('q'):
             break
+
+        if writer is None:
+            (h, w) = img.shape[:2]
+            writer = \
+                cv2.VideoWriter("test_output.mp4", fourcc, 5,
+                                (w, h), True)
+        writer.write(img)
+
+
+if __name__ == "__main__":
+    fire.Fire(main)
+
