@@ -110,7 +110,7 @@ def write_text(output_frame, text):
 
 
 def main(model_path='mask_rcnn_inception_v2_coco_2018_01_28/frozen_inference_graph.pb',
-         video_path='scene_2.mp4'):
+         video_path='scene_1.mp4'):
     """
     Main loop of the application. Iterates through all frames in the input video
     detects people and marks dangerous regions.
