@@ -2,7 +2,7 @@ fire
 h5py==2.10.0
 jupyterlab==0.35.6
 matplotlib
-numpy==1.17.1
+numpy==1.22.0
 tensorflow-gpu==1.15.2
 tqdm
 opencv-python==4.1.0.25
